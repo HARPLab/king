@@ -1,0 +1,37 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python Debugger: Current File",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal"
+        },
+        {"name": "Run KING generation",
+        "type": "python",
+        "request": "launch",
+        "env": {
+            "CARLA_ROOT": "carla_server",
+            "CARLA_SERVER": "carla_server/CarlaUE4.sh",
+            "PYTHONPATH": "carla_server/PythonAPI:carla_server/PythonAPI/carla:carla_server/PythonAPI/carla/dist/carla-0.9.10-py3.7-linux-x86_64.egg:${workspaceFolder}/leaderboard:${workspaceFolder}/scenario_runner"
+        },
+        "program": "${workspaceFolder}/generate_scenarios.py",
+        "args": [
+             "--num_agents", "1",
+             "--save_path", "./generation_results/agents_1",
+             "--opt_iters", "100",
+             "--beta1", "0.8",
+             "--beta2", "0.99",
+             "--w_adv_col", "3.0",
+             "--w_adv_rd", "20.0",
+             "--ego_agent", "PlanT",
+             "--renderer_class", "CARLA"
+            ],
+            "console": "integratedTerminal"
+        }
+    ]
+}

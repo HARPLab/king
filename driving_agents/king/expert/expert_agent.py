@@ -170,19 +170,19 @@ class AutoPilot(autonomous_agent.AutonomousAgent):
             setattr(self, key, value)
 
     def reset(self):
-        self.step = -1
-        self.wall_start = time.time()
-        self.initialized = False
+        self.step = -1 # present
+        self.wall_start = time.time() # absent
+        self.initialized = False # present
 
-        self.ego_model     = EgoModel(dt=(1.0 / self.frame_rate))
-        self.vehicle_model = BicycleModel(delta_t=(1.0 / self.frame_rate)).to(self.device)
+        self.ego_model     = EgoModel(dt=(1.0 / self.frame_rate)) #present
+        self.vehicle_model = BicycleModel(delta_t=(1.0 / self.frame_rate)).to(self.device) # present but different (not bicycle model)
 
-        self.steer_buffer = []
-        self.vehicle_speed_buffer = defaultdict( lambda: {"velocity": [], "throttle": [], "brake": []})
+        self.steer_buffer = [] #absent
+        self.vehicle_speed_buffer = defaultdict( lambda: {"velocity": [], "throttle": [], "brake": []}) # present
 
-        self.steer = np.zeros(shape=(self.args.batch_size))
-        self.brake = np.zeros(shape=(self.args.batch_size))
-        self.throttle = np.zeros(shape=(self.args.batch_size))
+        self.steer = np.zeros(shape=(self.args.batch_size)) # present
+        self.brake = np.zeros(shape=(self.args.batch_size)) # present
+        self.throttle = np.zeros(shape=(self.args.batch_size)) # present
 
     def sensors(self):
         pass

@@ -16,6 +16,7 @@ import torch.nn.functional as F
 
 from driving_agents.king.expert.expert_agent import AutoPilot
 from driving_agents.king.transfuser.transfuser_agent import TransFuserAgent
+from driving_agents.king.plant.carla_agent_files.PlanT_agent import PlanTAgent
 from driving_agents.king.aim_bev.aim_bev_agent import AimBEVAgent
 from leaderboard.utils.route_indexer import RouteIndexer
 from srunner.tools.route_manipulation import interpolate_trajectory
@@ -26,11 +27,25 @@ from proxy_simulator.utils import save_args
 from proxy_simulator.bm_policy import BMActionSequence
 from proxy_simulator.driving_costs import RouteDeviationCostRasterized, BatchedPolygonCollisionCost
 
+from omegaconf import OmegaConf
+
 
 # Global Flags
 PIXELS_PER_METER = 5
 PIXELS_AHEAD_VEHICLE = 110
 
+def createCfg():
+    cfg = OmegaConf.create({'user': {'working_dir': '/scratch/zvasania/plant', 'carla_path': '/scratch/zvasania/plant/carla'}, 'experiments': {'name': 'PlanT', 'SHUFFLE_WEATHER': 0, 'DATAGEN': 0, 'agent': '/scratch/zvasania/king/driving_agents/king/plant/carla_agent_files/PlanT_agent.py', 'model_path': 'checkpoints/PlanT/3x/PlanT_medium', 'agent_root': '/scratch/zvasania/king/driving_agents/king/plant/carla_agent_files/checkpoints/PlanT/3x/PlanT_medium', 'agent_config': '/scratch/zvasania/king/driving_agents/king/plant/carla_agent_files/checkpoints/PlanT/3x/PlanT_medium/log/', 'model_ckpt_load_path': '/scratch/zvasania/king/driving_agents/king/plant/checkpoints/PlanT/3x/PlanT_medium/checkpoints/epoch=047.ckpt'}, 'eval': {'BENCHMARK': 'longest6', 'route_rel': 'leaderboard/data/longest6/longest6.xml', 'scenarios_rel': 'leaderboard/data/longest6/eval_scenarios.json',  'save_explainability_viz': False, 'host': 'localhost', 'port': 2000, 'trafficManagerPort': 8000, 'trafficManagerSeed': 0, 'dataProviderSeed': 0, 'debug': 0, 'viz': 0, 'record': '', 'timeout': 600.0, 'repetitions': 1, 'track': 'MAP', 'resume': 0, 'save_path': 'TEST_EVAL', 'log_save_path': 'result_logs', 'checkpoint_file': 'results.json', 'DEBUG_CHALLENGE': 0, 'CUDA_VISIBLE_DEVICES': 0}})
+    cfg_org = cfg.copy()
+    cfg = cfg.experiments
+    #cfg = OmegaConf.create({'name': 'PlanT', 'SHUFFLE_WEATHER': 0, 'DATAGEN': 0, 'agent': '/scratch/zvasania/king/driving_agents/king/plant/carla_agent_files/PlanT_agent.py', 'model_path': 'checkpoints/PlanT/3x/PlanT_medium', 'agent_root': '${user.working_dir}/${experiments.model_path}', 'agent_config': '${experiments.agent_root}/log/', 'model_ckpt_load_path': '${experiments.agent_root}/checkpoints/epoch=047.ckpt'})
+    arg_dict0 = OmegaConf.to_container(cfg_org['eval'], resolve=True)
+    arg_dict1 = OmegaConf.to_container(cfg, resolve=True)
+    arg_dict2 = OmegaConf.to_container(cfg_org, resolve=True)
+    arg_dict1.update(arg_dict2)
+    arg_dict1.update(arg_dict0)
+    args=argparse.Namespace(**arg_dict1)
+    return args
 
 class GenerationEngine:
     """Engine that controls the differentiable simulator.
@@ -62,6 +77,10 @@ class GenerationEngine:
                 device=args.device,
                 path_to_conf_file=args.ego_agent_ckpt
             )
+        elif args.ego_agent == 'PlanT':
+            path_to_conf_file = '/scratch/zvasania/king/driving_agents/king/plant/checkpoints/PlanT/3x/PlanT_medium/log/'
+            cfg = createCfg()
+            ego_policy = PlanTAgent(cfg, device = args.device, path_to_conf_file = path_to_conf_file)
 
         # SIMULATOR #
         self.simulator = ProxySimulator(
@@ -351,6 +370,13 @@ class GenerationEngine:
 
         for t in range(self.args.sim_horizon):
             input_data = self.simulator.get_ego_sensor()
+            if(self.args.ego_agent == 'PlanT'):
+                input_data.update({"hd_map": {"vehWorld": self.simulator.renderer.hero_actor, "opendrive": self.simulator.carla_wrapper.map.to_opendrive()}})
+            #     actorList = self.simulator.carla_wrapper.world.get_actors()
+            #     for actor in actorList:
+            #         if(actor.attributes["role_name"] == "hero"):
+            #             print("Ego Vehicle Found!")
+            #             break
             input_data.update({"timestep": self.simulator.timestep})
 
             observations, _ = self.simulator.renderer.get_observations(
@@ -554,7 +580,7 @@ if __name__ == '__main__':
         "--ego_agent",
         type=str,
         default='aim-bev',
-        choices=['aim-bev', 'transfuser'],
+        choices=['aim-bev', 'transfuser', 'PlanT'],
         help="The agent under test."
     )
     main_parser.add_argument(

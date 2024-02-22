@@ -464,6 +464,7 @@ class CARLARenderer(BaseRenderer):
                     print(f"WARNING: Could not spawn ego agent.")
 
         self.actors.append(ego_actor)
+        self.hero_actor = ego_actor
 
         # set spectator to BEV a few meters ahead of the ego agent
         spectator_transform = ego_transform
