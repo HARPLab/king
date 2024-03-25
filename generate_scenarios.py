@@ -9,6 +9,10 @@ from tqdm.auto import trange
 import random
 import carla
 from pathlib import Path
+#import wandb
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 from PIL import ImageShow
 import numpy as np
@@ -26,6 +30,7 @@ from proxy_simulator.motion_model import BicycleModel
 from proxy_simulator.utils import save_args
 from proxy_simulator.bm_policy import BMActionSequence
 from proxy_simulator.driving_costs import RouteDeviationCostRasterized, BatchedPolygonCollisionCost
+from tools.randombbo import RandBBO
 
 from omegaconf import OmegaConf
 
@@ -35,8 +40,20 @@ PIXELS_PER_METER = 5
 PIXELS_AHEAD_VEHICLE = 110
 
 def createCfg():
-    cfg = OmegaConf.create({'user': {'working_dir': '/scratch/zvasania/plant', 'carla_path': '/scratch/zvasania/plant/carla'}, 'experiments': {'name': 'PlanT', 'SHUFFLE_WEATHER': 0, 'DATAGEN': 0, 'agent': '/scratch/zvasania/king/driving_agents/king/plant/carla_agent_files/PlanT_agent.py', 'model_path': 'checkpoints/PlanT/3x/PlanT_medium', 'agent_root': '/scratch/zvasania/king/driving_agents/king/plant/carla_agent_files/checkpoints/PlanT/3x/PlanT_medium', 'agent_config': '/scratch/zvasania/king/driving_agents/king/plant/carla_agent_files/checkpoints/PlanT/3x/PlanT_medium/log/', 'model_ckpt_load_path': '/scratch/zvasania/king/driving_agents/king/plant/checkpoints/PlanT/3x/PlanT_medium/checkpoints/epoch=047.ckpt'}, 'eval': {'BENCHMARK': 'longest6', 'route_rel': 'leaderboard/data/longest6/longest6.xml', 'scenarios_rel': 'leaderboard/data/longest6/eval_scenarios.json',  'save_explainability_viz': False, 'host': 'localhost', 'port': 2000, 'trafficManagerPort': 8000, 'trafficManagerSeed': 0, 'dataProviderSeed': 0, 'debug': 0, 'viz': 0, 'record': '', 'timeout': 600.0, 'repetitions': 1, 'track': 'MAP', 'resume': 0, 'save_path': 'TEST_EVAL', 'log_save_path': 'result_logs', 'checkpoint_file': 'results.json', 'DEBUG_CHALLENGE': 0, 'CUDA_VISIBLE_DEVICES': 0}})
+    cfg = OmegaConf.create({'user': {'working_dir': '/scratch/zvasania/plant', 
+                                     'carla_path': '/scratch/zvasania/plant/carla'}, 
+                            'experiments': {'name': 'PlanT', 'SHUFFLE_WEATHER': 0, 
+                                            'DATAGEN': 0, 'agent': '/scratch/zvasania/king/driving_agents/king/plant/carla_agent_files/PlanT_agent.py', 
+                                            'model_path': 'checkpoints/PlanT/3x/PlanT_mini', 
+                                            'agent_root': '/scratch/zvasania/king/driving_agents/king/plant/carla_agent_files/checkpoints/PlanT/3x/PlanT_mini', 
+                                            'agent_config': '/scratch/zvasania/king/driving_agents/king/plant/carla_agent_files/checkpoints/PlanT/3x/PlanT_mini/log/', 
+                                            'model_ckpt_load_path': '/scratch/zvasania/king/driving_agents/king/plant/checkpoints/PlanT/3x/PlanT_mini/checkpoints/epoch=047.ckpt'}, 
+                             'eval': {'BENCHMARK': 'longest6', 'route_rel': 'leaderboard/data/longest6/longest6.xml', 'scenarios_rel': 'leaderboard/data/longest6/eval_scenarios.json',  
+                                      'save_explainability_viz': False, 'host': 'localhost', 'trafficManagerSeed': 0, 'dataProviderSeed': 0, 
+                                      'debug': 0, 'viz': 0, 'record': '', 'timeout': 600.0, 'repetitions': 1, 'track': 'MAP', 'resume': 0, 'save_path': 'TEST_EVAL', 'log_save_path': 'result_logs', 
+                                      'checkpoint_file': 'results.json', 'DEBUG_CHALLENGE': 0, 'CUDA_VISIBLE_DEVICES': 0}})
     cfg_org = cfg.copy()
+    #'port': 2000, 'trafficManagerPort': 8000,
     cfg = cfg.experiments
     #cfg = OmegaConf.create({'name': 'PlanT', 'SHUFFLE_WEATHER': 0, 'DATAGEN': 0, 'agent': '/scratch/zvasania/king/driving_agents/king/plant/carla_agent_files/PlanT_agent.py', 'model_path': 'checkpoints/PlanT/3x/PlanT_medium', 'agent_root': '${user.working_dir}/${experiments.model_path}', 'agent_config': '${experiments.agent_root}/log/', 'model_ckpt_load_path': '${experiments.agent_root}/checkpoints/epoch=047.ckpt'})
     arg_dict0 = OmegaConf.to_container(cfg_org['eval'], resolve=True)
@@ -78,7 +95,7 @@ class GenerationEngine:
                 path_to_conf_file=args.ego_agent_ckpt
             )
         elif args.ego_agent == 'PlanT':
-            path_to_conf_file = '/scratch/zvasania/king/driving_agents/king/plant/checkpoints/PlanT/3x/PlanT_medium/log/'
+            path_to_conf_file = '/scratch/zvasania/king/driving_agents/king/plant/checkpoints/PlanT/3x/PlanT_mini/log/'
             cfg = createCfg()
             ego_policy = PlanTAgent(cfg, device = args.device, path_to_conf_file = path_to_conf_file)
 
@@ -100,6 +117,7 @@ class GenerationEngine:
         if self.args.max_num_routes == -1:
             self.args.max_num_routes = self.route_indexer.total
 
+    #@profile
     def run(self):
         """
         """
@@ -108,7 +126,8 @@ class GenerationEngine:
             self.simulator.adv_policy.steer,
             self.simulator.adv_policy.throttle,
         ]
-        scenario_optim = torch.optim.Adam(scenario_params, lr=self.args.learning_rate, betas=(self.args.beta1, self.args.beta2),)
+        #scenario_optim = torch.optim.Adam(scenario_params, lr=self.args.learning_rate, betas=(self.args.beta1, self.args.beta2),)
+        scenario_optim = RandBBO(scenario_params, distr='norm', var=[0.00021563524205703288, 0.0006005183095112443])
 
         route_loop_bar = trange(
             self.route_indexer.total // self.args.batch_size
@@ -129,10 +148,16 @@ class GenerationEngine:
             self.curr_route_name = [conf.name for conf in route_config]
 
             # re-initialize ADAM's state for each route
-            scenario_optim = torch.optim.Adam(scenario_params, lr=self.args.learning_rate, betas=(self.args.beta1, self.args.beta2),)
+            #scenario_optim = torch.optim.Adam(scenario_params, lr=self.args.learning_rate, betas=(self.args.beta1, self.args.beta2),)
+            scenario_optim = RandBBO(scenario_params, distr='norm', var=[0.00021563524205703288, 0.0006005183095112443])
 
             # OPTIMIZATION LOOP FOR CURRENT ROUTE
             opt_loop_bar = trange(self.args.opt_iters, leave=False)
+            violinPlotValsT, violinPlotValsS = [], []
+            prevLoss = float('inf')
+            prevSteer = None
+            prevThrottle = None
+
             for i in opt_loop_bar:
                 if len(all_metrics) <= i:
                     all_metrics.append([])
@@ -171,14 +196,29 @@ class GenerationEngine:
                     self.args.w_adv_rd * cost_dict["adv_rd"].mean(),
                     -1*self.args.w_adv_col * cost_dict["adv_col"].mean()
                 ])
+                if(ix == 0 and False):
+                    wandb.log({"OptimIter": i, "ego_col": cost_dict["ego_col"].mean(), "adv_rd": cost_dict["adv_rd"].mean(), "adv_col": cost_dict["adv_col"].mean(), 'totalObj': total_objective})
 
                 collisions = self.simulator.ego_collision[self.simulator.ego_collision == 1.]
                 col_metric = len(collisions) / self.args.batch_size
 
-                if col_metric != 1.0:
-                    total_objective.backward()
-                    scenario_optim.step()
+                # Case on optim type param - king/random search
+                # Make distribution and params of distribution args to function
+                # Gaussian: Mean (current value of steer throttle)
+                #           Variance (vary)
+                violinPlotValsT.append(self.simulator.adv_policy.throttle[0,0].cpu())
+                violinPlotValsS.append(self.simulator.adv_policy.steer[0,0].cpu())
 
+                if col_metric != 1.0:
+                    #total_objective.backward()
+                    if(total_objective.item() < prevLoss):
+                        prevThrottle = self.simulator.adv_policy.throttle
+                        prevSteer = self.simulator.adv_policy.steer
+                        prevLoss = total_objective.item()
+                    else:
+                        self.simulator.adv_policy.throttle = prevThrottle
+                        self.simulator.adv_policy.steer = prevSteer
+                    scenario_optim.step()
                 #### BUFFERS ###
                 state_buffers.append(self.simulator.state_buffer)
                 ego_actions_buffers.append(self.simulator.ego_action_buffer)
@@ -218,8 +258,38 @@ class GenerationEngine:
 
                 if col_metric == 1:
                     break
-
             # prepare and save results of route
+            """if(ix == 0):
+                firstTens = torch.hstack(violinPlotValsT)
+                sim_horiz = firstTens.size(0)
+                firstTens = firstTens.view(-1)
+                classTens = torch.arange(sim_horiz).repeat_interleave(self.args.opt_iters)
+                stackTranspose = torch.vstack([firstTens, classTens]).t()
+                df = pd.DataFrame(stackTranspose.detach().numpy(), columns=["Throttle", "Timestep"])
+                sns.violinplot(data=df, x='Timestep', y='Throttle')
+                plot_file = "violin_plot_t.png"
+                plt.savefig(plot_file)
+                plt.close()  # Close the plot to free up memory
+                
+                # Log the plot to WandB
+                wandb.log({"custom_violin_plot_t": wandb.Image(plot_file)})
+
+                firstTens = torch.hstack(violinPlotValsS)
+                sim_horiz = firstTens.size(0)
+                firstTens = firstTens.view(-1)
+                classTens = torch.arange(sim_horiz).repeat_interleave(self.args.opt_iters)
+                stackTranspose = torch.vstack([firstTens, classTens]).t()
+                df = pd.DataFrame(stackTranspose.detach().numpy(), columns=["Steer", "Timestep"])
+                sns.violinplot(data=df, x='Timestep', y='Steer')
+                plot_file = "violin_plot_s.png"
+                plt.savefig(plot_file)
+                plt.close()  # Close the plot to free up memory
+                
+                # Log the plot to WandB
+                wandb.log({"custom_violin_plot_s": wandb.Image(plot_file)})"""
+                
+
+
             for batch_idx in range(self.args.batch_size):
                 # make buffers json dumpable
                 # nested lists of opt_iter and timestep
@@ -643,6 +713,7 @@ if __name__ == '__main__':
     )
 
     args = main_parser.parse_args()
+    #wandb.init(project="Research-KING-Optim")
 
     # reproducibility
     np.random.seed(args.seed)
@@ -658,3 +729,4 @@ if __name__ == '__main__':
     save_args(args, args.save_path)
 
     main(args)
+    #wandb.finish()

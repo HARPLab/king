@@ -7,6 +7,10 @@ fine_tuning_results/
 __pycache__/
 driving_agents/king/transfuser/model_checkpoints
 driving_agents/king/plant/checkpoints
+wandb/
+*.json
+models.zip
+*.lprof
 
 *.png
 
