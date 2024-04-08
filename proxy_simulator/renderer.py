@@ -395,13 +395,15 @@ class CARLARenderer(BaseRenderer):
 
         counter = 0
         try:
-            obs_dict = {
-                'spectator': self._parse_image_cb(self.spectator_cam_buffer[-1]),
-                'rgb': self._parse_image_cb(self.ego_cam_buffer[-1]),
-                'rgb_left': self._parse_image_cb(self.egoleft_cam_buffer[-1]),
-                'rgb_right': self._parse_image_cb(self.egoright_cam_buffer[-1]),
-                'lidar': self._parse_lidar_cb(self.ego_lidar_buffer[-1]),
-            }
+            obs_dict = dict()
+            if self.args.ego_agent=="transfuser":
+                obs_dict = {
+                    'spectator': self._parse_image_cb(self.spectator_cam_buffer[-1]),
+                    'rgb': self._parse_image_cb(self.ego_cam_buffer[-1]),
+                    'rgb_left': self._parse_image_cb(self.egoleft_cam_buffer[-1]),
+                    'rgb_right': self._parse_image_cb(self.egoright_cam_buffer[-1]),
+                    'lidar': self._parse_lidar_cb(self.ego_lidar_buffer[-1]),
+                }
         except IndexError:
             print("Encountered empty buffer, retrying.")
             counter += 1
@@ -433,6 +435,7 @@ class CARLARenderer(BaseRenderer):
         settings.fixed_delta_seconds = 1/20.
         self.world.apply_settings(settings)
 
+    #@profile
     def initialize_carla_state(self, ego_state, adv_state, town=None, diverse_actors=False):
         """
         """
@@ -474,116 +477,117 @@ class CARLARenderer(BaseRenderer):
         spectator_transform.location.y += shift.y
         spectator_transform.rotation.pitch -= 90.
         self.world.get_spectator().set_transform(ego_transform)
+        if self.args.ego_agent=="transfuser":
 
-        # attach camera to spectator
-        camera_bp = self.world.get_blueprint_library().find('sensor.camera.rgb')
-        camera_bp.set_attribute("image_size_x",str(1024))
-        camera_bp.set_attribute("image_size_y",str(1024))
-        camera_bp.set_attribute("fov",str(105))
-        camera_bp.set_attribute('lens_circle_multiplier', str(3.0))
-        camera_bp.set_attribute('lens_circle_falloff', str(3.0))
-        camera_bp.set_attribute('chromatic_aberration_intensity', str(0.5))
-        camera_bp.set_attribute('chromatic_aberration_offset', str(0))
-        camera_location = carla.Location(0,0,0)
-        camera_rotation = carla.Rotation(0,0,0)
-        camera_transform = carla.Transform(camera_location, camera_rotation)
-        self.spectator_cam = self.world.spawn_actor(
-            camera_bp,
-            camera_transform,
-            attach_to=self.world.get_spectator(),
-            attachment_type=carla.AttachmentType.Rigid
-        )
-        self.spectator_cam.listen(lambda image: self.spectator_cam_buffer.append(image))
-        self.sensors.append(self.spectator_cam)
+            # attach camera to spectator
+            camera_bp = self.world.get_blueprint_library().find('sensor.camera.rgb')
+            camera_bp.set_attribute("image_size_x",str(1024))
+            camera_bp.set_attribute("image_size_y",str(1024))
+            camera_bp.set_attribute("fov",str(105))
+            camera_bp.set_attribute('lens_circle_multiplier', str(3.0))
+            camera_bp.set_attribute('lens_circle_falloff', str(3.0))
+            camera_bp.set_attribute('chromatic_aberration_intensity', str(0.5))
+            camera_bp.set_attribute('chromatic_aberration_offset', str(0))
+            camera_location = carla.Location(0,0,0)
+            camera_rotation = carla.Rotation(0,0,0)
+            camera_transform = carla.Transform(camera_location, camera_rotation)
+            self.spectator_cam = self.world.spawn_actor(
+                camera_bp,
+                camera_transform,
+                attach_to=self.world.get_spectator(),
+                attachment_type=carla.AttachmentType.Rigid
+            )
+            self.spectator_cam.listen(lambda image: self.spectator_cam_buffer.append(image))
+            self.sensors.append(self.spectator_cam)
 
-        # rgb cam for transfuser
-        camera_bp2 = self.world.get_blueprint_library().find('sensor.camera.rgb')
-        camera_bp2.set_attribute("image_size_x", str(400))
-        camera_bp2.set_attribute("image_size_y", str(300))
-        camera_bp2.set_attribute("fov", str(100))
-        camera_bp2.set_attribute('lens_circle_multiplier', str(3.0))
-        camera_bp2.set_attribute('lens_circle_falloff', str(3.0))
-        camera_bp2.set_attribute('chromatic_aberration_intensity', str(0.5))
-        camera_bp2.set_attribute('chromatic_aberration_offset', str(0))
-        camera_location = carla.Location(1.3, 0, 2.3)
-        camera_rotation = carla.Rotation(0, 0, 0)
-        camera_transform = carla.Transform(camera_location, camera_rotation)
-        self.ego_cam = self.world.spawn_actor(
-            camera_bp2,
-            camera_transform,
-            attach_to=ego_actor,
-            attachment_type=carla.AttachmentType.Rigid
-        )
-        self.ego_cam.listen(lambda image: self.ego_cam_buffer.append(image))
-        self.sensors.append(self.ego_cam)
+            # rgb cam for transfuser
+            camera_bp2 = self.world.get_blueprint_library().find('sensor.camera.rgb')
+            camera_bp2.set_attribute("image_size_x", str(400))
+            camera_bp2.set_attribute("image_size_y", str(300))
+            camera_bp2.set_attribute("fov", str(100))
+            camera_bp2.set_attribute('lens_circle_multiplier', str(3.0))
+            camera_bp2.set_attribute('lens_circle_falloff', str(3.0))
+            camera_bp2.set_attribute('chromatic_aberration_intensity', str(0.5))
+            camera_bp2.set_attribute('chromatic_aberration_offset', str(0))
+            camera_location = carla.Location(1.3, 0, 2.3)
+            camera_rotation = carla.Rotation(0, 0, 0)
+            camera_transform = carla.Transform(camera_location, camera_rotation)
+            self.ego_cam = self.world.spawn_actor(
+                camera_bp2,
+                camera_transform,
+                attach_to=ego_actor,
+                attachment_type=carla.AttachmentType.Rigid
+            )
+            self.ego_cam.listen(lambda image: self.ego_cam_buffer.append(image))
+            self.sensors.append(self.ego_cam)
 
-        # rgb left for trnasfuser
-        camera_bp3 = self.world.get_blueprint_library().find('sensor.camera.rgb')
-        camera_bp3.set_attribute("image_size_x", str(400))
-        camera_bp3.set_attribute("image_size_y", str(300))
-        camera_bp3.set_attribute("fov", str(100))
-        camera_bp3.set_attribute('lens_circle_multiplier', str(3.0))
-        camera_bp3.set_attribute('lens_circle_falloff', str(3.0))
-        camera_bp3.set_attribute('chromatic_aberration_intensity', str(0.5))
-        camera_bp3.set_attribute('chromatic_aberration_offset', str(0))
-        # camera_location = carla.Location(0,0,0)
-        camera_location = carla.Location(1.3, 0, 2.3)
-        camera_rotation = carla.Rotation(0, -60, 0)
-        camera_transform = carla.Transform(camera_location, camera_rotation)
-        self.egoleft_cam = self.world.spawn_actor(
-            camera_bp3,
-            camera_transform,
-            attach_to=ego_actor,
-            attachment_type=carla.AttachmentType.Rigid
-        )
-        self.egoleft_cam.listen(lambda image: self.egoleft_cam_buffer.append(image))
-        self.sensors.append(self.egoleft_cam)
+            # rgb left for trnasfuser
+            camera_bp3 = self.world.get_blueprint_library().find('sensor.camera.rgb')
+            camera_bp3.set_attribute("image_size_x", str(400))
+            camera_bp3.set_attribute("image_size_y", str(300))
+            camera_bp3.set_attribute("fov", str(100))
+            camera_bp3.set_attribute('lens_circle_multiplier', str(3.0))
+            camera_bp3.set_attribute('lens_circle_falloff', str(3.0))
+            camera_bp3.set_attribute('chromatic_aberration_intensity', str(0.5))
+            camera_bp3.set_attribute('chromatic_aberration_offset', str(0))
+            # camera_location = carla.Location(0,0,0)
+            camera_location = carla.Location(1.3, 0, 2.3)
+            camera_rotation = carla.Rotation(0, -60, 0)
+            camera_transform = carla.Transform(camera_location, camera_rotation)
+            self.egoleft_cam = self.world.spawn_actor(
+                camera_bp3,
+                camera_transform,
+                attach_to=ego_actor,
+                attachment_type=carla.AttachmentType.Rigid
+            )
+            self.egoleft_cam.listen(lambda image: self.egoleft_cam_buffer.append(image))
+            self.sensors.append(self.egoleft_cam)
 
-        # rgb right for transfuser
-        camera_bp4 = self.world.get_blueprint_library().find('sensor.camera.rgb')
-        camera_bp4.set_attribute("image_size_x", str(400))
-        camera_bp4.set_attribute("image_size_y", str(300))
-        camera_bp4.set_attribute("fov", str(100))
-        camera_bp4.set_attribute('lens_circle_multiplier', str(3.0))
-        camera_bp4.set_attribute('lens_circle_falloff', str(3.0))
-        camera_bp4.set_attribute('chromatic_aberration_intensity', str(0.5))
-        camera_bp4.set_attribute('chromatic_aberration_offset', str(0))
-        camera_location = carla.Location(1.3, 0, 2.3)
-        camera_rotation = carla.Rotation(0, 60, 0)
-        camera_transform = carla.Transform(camera_location, camera_rotation)
-        self.egoright_cam = self.world.spawn_actor(
-            camera_bp4,
-            camera_transform,
-            attach_to=ego_actor,
-            attachment_type=carla.AttachmentType.Rigid
-        )
-        self.egoright_cam.listen(lambda image: self.egoright_cam_buffer.append(image))
-        self.sensors.append(self.egoright_cam)
+            # rgb right for transfuser
+            camera_bp4 = self.world.get_blueprint_library().find('sensor.camera.rgb')
+            camera_bp4.set_attribute("image_size_x", str(400))
+            camera_bp4.set_attribute("image_size_y", str(300))
+            camera_bp4.set_attribute("fov", str(100))
+            camera_bp4.set_attribute('lens_circle_multiplier', str(3.0))
+            camera_bp4.set_attribute('lens_circle_falloff', str(3.0))
+            camera_bp4.set_attribute('chromatic_aberration_intensity', str(0.5))
+            camera_bp4.set_attribute('chromatic_aberration_offset', str(0))
+            camera_location = carla.Location(1.3, 0, 2.3)
+            camera_rotation = carla.Rotation(0, 60, 0)
+            camera_transform = carla.Transform(camera_location, camera_rotation)
+            self.egoright_cam = self.world.spawn_actor(
+                camera_bp4,
+                camera_transform,
+                attach_to=ego_actor,
+                attachment_type=carla.AttachmentType.Rigid
+            )
+            self.egoright_cam.listen(lambda image: self.egoright_cam_buffer.append(image))
+            self.sensors.append(self.egoright_cam)
 
-        # lidar for transfuser
-        lidar_bp = self.world.get_blueprint_library().find('sensor.lidar.ray_cast')
-        lidar_bp.set_attribute('range', str(85))
-        lidar_bp.set_attribute('rotation_frequency', str(20))  # default: 10, change to 20 to generate 360 degree LiDAR point cloud
-        lidar_bp.set_attribute('channels', str(64))
-        lidar_bp.set_attribute('upper_fov', str(10))
-        lidar_bp.set_attribute('lower_fov', str(-30))
-        lidar_bp.set_attribute('points_per_second', str(2*600000))
-        lidar_bp.set_attribute('atmosphere_attenuation_rate', str(0.004))
-        lidar_bp.set_attribute('dropoff_general_rate', str(0.45))
-        lidar_bp.set_attribute('dropoff_intensity_limit', str(0.8))
-        lidar_bp.set_attribute('dropoff_zero_intensity', str(0.4))
+            # lidar for transfuser
+            lidar_bp = self.world.get_blueprint_library().find('sensor.lidar.ray_cast')
+            lidar_bp.set_attribute('range', str(85))
+            lidar_bp.set_attribute('rotation_frequency', str(20))  # default: 10, change to 20 to generate 360 degree LiDAR point cloud
+            lidar_bp.set_attribute('channels', str(64))
+            lidar_bp.set_attribute('upper_fov', str(10))
+            lidar_bp.set_attribute('lower_fov', str(-30))
+            lidar_bp.set_attribute('points_per_second', str(2*600000))
+            lidar_bp.set_attribute('atmosphere_attenuation_rate', str(0.004))
+            lidar_bp.set_attribute('dropoff_general_rate', str(0.45))
+            lidar_bp.set_attribute('dropoff_intensity_limit', str(0.8))
+            lidar_bp.set_attribute('dropoff_zero_intensity', str(0.4))
 
-        camera_location = carla.Location(1.3, 0, 2.5)
-        camera_rotation = carla.Rotation(0, -90, 0)
-        camera_transform = carla.Transform(camera_location, camera_rotation)
-        self.ego_lidar = self.world.spawn_actor(
-            lidar_bp,
-            camera_transform,
-            attach_to=ego_actor,
-            attachment_type=carla.AttachmentType.Rigid
-        )
-        self.ego_lidar.listen(lambda image: self.ego_lidar_buffer.append(image))
-        self.sensors.append(self.ego_lidar)
+            camera_location = carla.Location(1.3, 0, 2.5)
+            camera_rotation = carla.Rotation(0, -90, 0)
+            camera_transform = carla.Transform(camera_location, camera_rotation)
+            self.ego_lidar = self.world.spawn_actor(
+                lidar_bp,
+                camera_transform,
+                attach_to=ego_actor,
+                attachment_type=carla.AttachmentType.Rigid
+            )
+            self.ego_lidar.listen(lambda image: self.ego_lidar_buffer.append(image))
+            self.sensors.append(self.ego_lidar)
 
         # attach sensors
         adv_bp_blacklist = ["vehicle.carlamotors.carlacola"]
@@ -623,8 +627,8 @@ class CARLARenderer(BaseRenderer):
                 actor.set_simulate_physics(False)
 
         self.carla_wrapper.world.tick()
-        self.carla_wrapper.world.tick()
-        self.carla_wrapper.world.tick()
+        #self.carla_wrapper.world.tick()
+        #self.carla_wrapper.world.tick()
 
     def set_carla_state(self, ego_state, adv_state):
         """

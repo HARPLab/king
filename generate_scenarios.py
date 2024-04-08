@@ -126,8 +126,10 @@ class GenerationEngine:
             self.simulator.adv_policy.steer,
             self.simulator.adv_policy.throttle,
         ]
-        #scenario_optim = torch.optim.Adam(scenario_params, lr=self.args.learning_rate, betas=(self.args.beta1, self.args.beta2),)
-        scenario_optim = RandBBO(scenario_params, distr='norm', var=[0.00021563524205703288, 0.0006005183095112443])
+        if(self.args.optimType == "randombbo"):
+            scenario_optim = RandBBO(scenario_params, distr='norm', var=[0.00021563524205703288, 0.0006005183095112443])
+        else:
+            scenario_optim = torch.optim.Adam(scenario_params, lr=self.args.learning_rate, betas=(self.args.beta1, self.args.beta2),)
 
         route_loop_bar = trange(
             self.route_indexer.total // self.args.batch_size
@@ -148,8 +150,10 @@ class GenerationEngine:
             self.curr_route_name = [conf.name for conf in route_config]
 
             # re-initialize ADAM's state for each route
-            #scenario_optim = torch.optim.Adam(scenario_params, lr=self.args.learning_rate, betas=(self.args.beta1, self.args.beta2),)
-            scenario_optim = RandBBO(scenario_params, distr='norm', var=[0.00021563524205703288, 0.0006005183095112443])
+            if(self.args.optimType == "randombbo"):
+                scenario_optim = RandBBO(scenario_params, distr='norm', var=[0.00021563524205703288, 0.0006005183095112443])
+            else:
+                scenario_optim = torch.optim.Adam(scenario_params, lr=self.args.learning_rate, betas=(self.args.beta1, self.args.beta2),)
 
             # OPTIMIZATION LOOP FOR CURRENT ROUTE
             opt_loop_bar = trange(self.args.opt_iters, leave=False)
@@ -157,6 +161,9 @@ class GenerationEngine:
             prevLoss = float('inf')
             prevSteer = None
             prevThrottle = None
+
+            numCollisions = []
+            prevInpSp = None
 
             for i in opt_loop_bar:
                 if len(all_metrics) <= i:
@@ -202,22 +209,26 @@ class GenerationEngine:
                 collisions = self.simulator.ego_collision[self.simulator.ego_collision == 1.]
                 col_metric = len(collisions) / self.args.batch_size
 
+                numCollisions.append(len(collisions))
+
                 # Case on optim type param - king/random search
                 # Make distribution and params of distribution args to function
                 # Gaussian: Mean (current value of steer throttle)
                 #           Variance (vary)
-                violinPlotValsT.append(self.simulator.adv_policy.throttle[0,0].cpu())
-                violinPlotValsS.append(self.simulator.adv_policy.steer[0,0].cpu())
+                #violinPlotValsT.append(self.simulator.adv_policy.throttle[0,0].cpu())
+                #violinPlotValsS.append(self.simulator.adv_policy.steer[0,0].cpu())
 
                 if col_metric != 1.0:
-                    #total_objective.backward()
-                    if(total_objective.item() < prevLoss):
-                        prevThrottle = self.simulator.adv_policy.throttle
-                        prevSteer = self.simulator.adv_policy.steer
-                        prevLoss = total_objective.item()
+                    if(self.args.optimType == "randombbo"):
+                        if(total_objective.item() < prevLoss):
+                            prevThrottle = self.simulator.adv_policy.throttle
+                            prevSteer = self.simulator.adv_policy.steer
+                            prevLoss = total_objective.item()
+                        else:
+                            self.simulator.adv_policy.throttle = prevThrottle
+                            self.simulator.adv_policy.steer = prevSteer
                     else:
-                        self.simulator.adv_policy.throttle = prevThrottle
-                        self.simulator.adv_policy.steer = prevSteer
+                        total_objective.backward()
                     scenario_optim.step()
                 #### BUFFERS ###
                 state_buffers.append(self.simulator.state_buffer)
@@ -259,6 +270,10 @@ class GenerationEngine:
                 if col_metric == 1:
                     break
             # prepare and save results of route
+            #print(f"{self.args.ego_agent}: {numCollisions}")
+            with open(f"./{self.args.ego_agent}.txt", "a") as file:
+                file.write(','.join(str(num) for num in numCollisions) + "\n")
+                #file.write(','.join(numCollisions)+"\n")
             """if(ix == 0):
                 firstTens = torch.hstack(violinPlotValsT)
                 sim_horiz = firstTens.size(0)
@@ -416,6 +431,7 @@ class GenerationEngine:
 
         results = {f'{key}_first': np.asarray(value).mean() for key, value in new_dict.items()}
 
+    #@profile
     def unroll_simulation(self):
         """
         Simulates one episode of length `args.sim_horizon` in the differentiable
@@ -442,32 +458,24 @@ class GenerationEngine:
             input_data = self.simulator.get_ego_sensor()
             if(self.args.ego_agent == 'PlanT'):
                 input_data.update({"hd_map": {"vehWorld": self.simulator.renderer.hero_actor, "opendrive": self.simulator.carla_wrapper.map.to_opendrive()}})
-            #     actorList = self.simulator.carla_wrapper.world.get_actors()
-            #     for actor in actorList:
-            #         if(actor.attributes["role_name"] == "hero"):
-            #             print("Ego Vehicle Found!")
-            #             break
             input_data.update({"timestep": self.simulator.timestep})
 
-            observations, _ = self.simulator.renderer.get_observations(
-                semantic_grid,
-                self.simulator.get_ego_state(),
-                self.simulator.get_adv_state(),
-            )
+            observations, _ = self.simulator.renderer.get_observations(semantic_grid, 
+                                                                       self.simulator.get_ego_state(), 
+                                                                       self.simulator.get_adv_state())
             input_data.update(observations)
+            # Modify input_data here according to loss
+                # Check what input_data contains with regard to other vehicles
+            #segbevL.append(input_data['birdview'])
 
-            ego_actions = self.simulator.ego_policy.run_step(
-                input_data, self.simulator
-            )
+            ego_actions = self.simulator.ego_policy.run_step(input_data, self.simulator)
 
             if self.args.detach_ego_path:
                 ego_actions["steer"] = ego_actions["steer"].detach()
                 ego_actions["throttle"] = ego_actions["throttle"].detach()
                 ego_actions["brake"] = ego_actions["brake"].detach()
 
-            adv_actions = self.simulator.adv_policy.run_step(
-                input_data
-            )
+            adv_actions = self.simulator.adv_policy.run_step(input_data)
 
             num_oob_agents = self.simulator.run_termination_checks()
             num_oob_agents_per_t.append(num_oob_agents)
@@ -483,6 +491,7 @@ class GenerationEngine:
 
         # stack timesteps for oob metric
         num_oob_agents_per_t = torch.stack(num_oob_agents_per_t, dim=1)
+        #torch.save(segbevL, 'segbev.pt')
 
         torch.cuda.empty_cache()
         return cost_dict, num_oob_agents_per_t
@@ -710,6 +719,12 @@ if __name__ == '__main__':
         type=str,
         default="driving_agents/king/aim_bev/king_initializations/initializations_subset/",
         help="Path to the scenario initalization files for the current agent and routes",
+    )
+    main_parser.add_argument(
+        '--optimType',
+        type=str,
+        default='randombbo',
+        help='Unique experiment identifier.'
     )
 
     args = main_parser.parse_args()

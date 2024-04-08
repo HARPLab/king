@@ -256,7 +256,7 @@ class PlanTAgent(DataAgent):
             
         return self.control
 
-
+    #@profile
     def _get_control(self, label_raw, input_data):
         
         gt_velocity = torch.FloatTensor([input_data['speed']]).unsqueeze(0)
@@ -311,11 +311,17 @@ class PlanTAgent(DataAgent):
         else:
             data = label_raw[1:] # remove first element (ego vehicle)
 
+        # x-y: Modify based on speed (* 0.25s per frame) to get uniform distr ranges
+        # in each componenet direction
+        # yaw: -30/30 degree delta
+        # speed: +- 0.5 kmph uniform sampling
+        # extent: -20%/20% sample delta from t = 0 (just for extent)
         data_car = [[
             1., # type indicator for cars
             float(x['position'][0])-float(label_raw[0]['position'][0]),
             float(x['position'][1])-float(label_raw[0]['position'][1]),
             float(x['yaw'] * 180 / 3.14159265359), # in degrees
+            # meters/second -> km/h
             float(x['speed'] * 3.6), # in km/h
             float(x['extent'][2]),
             float(x['extent'][1]),
