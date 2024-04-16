@@ -177,7 +177,7 @@ class GenerationEngine:
                     self.simulator.ego_policy.reset()
                     self.simulator.ego_expert.reset()
 
-                cost_dict, num_oob_per_t = self.unroll_simulation()
+                cost_dict, num_oob_per_t, nextInpSp = self.unroll_simulation(prevInpSp)
 
                 # aggregate costs and build total objective
                 cost_dict["ego_col"] = torch.min(
@@ -219,17 +219,24 @@ class GenerationEngine:
                 #violinPlotValsS.append(self.simulator.adv_policy.steer[0,0].cpu())
 
                 if col_metric != 1.0:
-                    if(self.args.optimType == "randombbo"):
-                        if(total_objective.item() < prevLoss):
-                            prevThrottle = self.simulator.adv_policy.throttle
-                            prevSteer = self.simulator.adv_policy.steer
-                            prevLoss = total_objective.item()
+                    if(self.args.attackSpace == "traj"):
+                        if(self.args.optimType == "randombbo"):
+                            if(total_objective.item() < prevLoss):
+                                prevThrottle = self.simulator.adv_policy.throttle
+                                prevSteer = self.simulator.adv_policy.steer
+                                prevLoss = total_objective.item()
+                            else:
+                                self.simulator.adv_policy.throttle = prevThrottle
+                                self.simulator.adv_policy.steer = prevSteer
                         else:
-                            self.simulator.adv_policy.throttle = prevThrottle
-                            self.simulator.adv_policy.steer = prevSteer
+                            total_objective.backward()
+                        scenario_optim.step()
                     else:
-                        total_objective.backward()
-                    scenario_optim.step()
+                        assert(self.args.ego_agent == 'PlanT' and self.args.optimType == "randombbo")
+                        if(total_objective.item() < prevLoss):
+                            prevInpSp = nextInpSp
+                            prevLoss = total_objective.item()
+
                 #### BUFFERS ###
                 state_buffers.append(self.simulator.state_buffer)
                 ego_actions_buffers.append(self.simulator.ego_action_buffer)
@@ -270,10 +277,8 @@ class GenerationEngine:
                 if col_metric == 1:
                     break
             # prepare and save results of route
-            #print(f"{self.args.ego_agent}: {numCollisions}")
-            with open(f"./{self.args.ego_agent}.txt", "a") as file:
+            with open(f"./{self.args.saveFile}.txt", "a") as file:
                 file.write(','.join(str(num) for num in numCollisions) + "\n")
-                #file.write(','.join(numCollisions)+"\n")
             """if(ix == 0):
                 firstTens = torch.hstack(violinPlotValsT)
                 sim_horiz = firstTens.size(0)
@@ -432,7 +437,7 @@ class GenerationEngine:
         results = {f'{key}_first': np.asarray(value).mean() for key, value in new_dict.items()}
 
     #@profile
-    def unroll_simulation(self):
+    def unroll_simulation(self, prevInp = None):
         """
         Simulates one episode of length `args.sim_horizon` in the differentiable
         simulator.
@@ -453,7 +458,7 @@ class GenerationEngine:
             observations_per_t = []
             lidar_per_t1 = []
             lidar_per_t2 = []
-
+        currInp = []
         for t in range(self.args.sim_horizon):
             input_data = self.simulator.get_ego_sensor()
             if(self.args.ego_agent == 'PlanT'):
@@ -467,8 +472,14 @@ class GenerationEngine:
             # Modify input_data here according to loss
                 # Check what input_data contains with regard to other vehicles
             #segbevL.append(input_data['birdview'])
-
-            ego_actions = self.simulator.ego_policy.run_step(input_data, self.simulator)
+            if(self.args.ego_agent != 'PlanT'):
+                ego_actions = self.simulator.ego_policy.run_step(input_data, self.simulator)
+            else:
+                if(prevInp != None):
+                    ego_actions, retInp = self.simulator.ego_policy.run_step(input_data, self.simulator, prevInp=prevInp[t])
+                else:
+                    ego_actions, retInp = self.simulator.ego_policy.run_step(input_data, self.simulator, prevInp=None)
+                currInp.append(retInp)
 
             if self.args.detach_ego_path:
                 ego_actions["steer"] = ego_actions["steer"].detach()
@@ -494,7 +505,7 @@ class GenerationEngine:
         #torch.save(segbevL, 'segbev.pt')
 
         torch.cuda.empty_cache()
-        return cost_dict, num_oob_agents_per_t
+        return cost_dict, num_oob_agents_per_t, currInp
 
     def compute_cost(self):
         """
@@ -724,7 +735,20 @@ if __name__ == '__main__':
         '--optimType',
         type=str,
         default='randombbo',
-        help='Unique experiment identifier.'
+        help='Optimization type: randombbo or king'
+    )
+    main_parser.add_argument(
+        '--attackSpace',
+        type=str,
+        default='traj',
+        help='Attack space: traj or inp'
+    )
+
+    main_parser.add_argument(
+        '--saveFile',
+        type=str,
+        default='PlanT',
+        help='Collision Metrics txt file'
     )
 
     args = main_parser.parse_args()

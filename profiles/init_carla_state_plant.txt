@@ -1,0 +1,204 @@
+Timer unit: 1e-06 s
+
+Total time: 1.52532 s
+File: /scratch/zvasania/king/proxy_simulator/renderer.py
+Function: initialize_carla_state at line 438
+
+Line #      Hits         Time  Per Hit   % Time  Line Contents
+==============================================================
+   438                                               @profile
+   439                                               def initialize_carla_state(self, ego_state, adv_state, town=None, diverse_actors=False):
+   440                                                   """
+   441                                                   """
+   442        23         43.1      1.9      0.0          self.town = town
+   443        23       2085.3     90.7      0.1          ego_transform = state_dict_to_transform(ego_state)[0][0]
+   444                                           
+   445        23       2210.1     96.1      0.1          actors = self.world.get_actors()
+   446        23        861.9     37.5      0.1          traffic_lights = actors.filter('*traffic_light*')
+   447       897       5029.1      5.6      0.3          for traffic_light in traffic_lights:
+   448       874       3892.4      4.5      0.3              traffic_light.set_state(carla.TrafficLightState.Green)
+   449       874       3707.6      4.2      0.2              traffic_light.set_green_time(100000.0)
+   450                                           
+   451                                                   # spawn ego
+   452        23       4237.6    184.2      0.3          ego_bp = self.bp_library.filter("vehicle.lincoln.mkz2017")[0]
+   453        23        158.8      6.9      0.0          ego_bp.set_attribute('color', '255,0,0')
+   454        23     357312.2  15535.3     23.4          ego_actor = self.world.try_spawn_actor(ego_bp, ego_transform)
+   455        23         25.9      1.1      0.0          tries = 0
+   456        23         25.0      1.1      0.0          while ego_actor is None and tries < 20:
+   457                                                       ego_transform.location.z += 0.05
+   458                                                       ego_actor = self.world.try_spawn_actor(ego_bp, ego_transform)
+   459                                                       tries += 1
+   460                                                       if tries == 20 and ego_actor is None:
+   461                                                           if hasattr(self.args, 'raise_failed_carla_spawn'):
+   462                                                               if self.args.raise_failed_carla_spawn:
+   463                                                                   raise RuntimeError(f"WARNING: Could not spawn ego agent.")
+   464                                                               else:
+   465                                                                   print(f"WARNING: Could not spawn ego agent.")
+   466                                                           else:
+   467                                                               print(f"WARNING: Could not spawn ego agent.")
+   468                                           
+   469        23         42.9      1.9      0.0          self.actors.append(ego_actor)
+   470        23         20.9      0.9      0.0          self.hero_actor = ego_actor
+   471                                           
+   472                                                   # set spectator to BEV a few meters ahead of the ego agent
+   473        23         10.8      0.5      0.0          spectator_transform = ego_transform
+   474        23        215.8      9.4      0.0          shift = spectator_transform.get_forward_vector() * 40
+   475        23        128.9      5.6      0.0          spectator_transform.location.z += 50.
+   476        23         69.1      3.0      0.0          spectator_transform.location.x += shift.x
+   477        23         49.8      2.2      0.0          spectator_transform.location.y += shift.y
+   478        23         87.7      3.8      0.0          spectator_transform.rotation.pitch -= 90.
+   479        23       6097.7    265.1      0.4          self.world.get_spectator().set_transform(ego_transform)
+   480        23         60.2      2.6      0.0          if self.args.ego_agent=="transfuser":
+   481                                           
+   482                                                       # attach camera to spectator
+   483                                                       camera_bp = self.world.get_blueprint_library().find('sensor.camera.rgb')
+   484                                                       camera_bp.set_attribute("image_size_x",str(1024))
+   485                                                       camera_bp.set_attribute("image_size_y",str(1024))
+   486                                                       camera_bp.set_attribute("fov",str(105))
+   487                                                       camera_bp.set_attribute('lens_circle_multiplier', str(3.0))
+   488                                                       camera_bp.set_attribute('lens_circle_falloff', str(3.0))
+   489                                                       camera_bp.set_attribute('chromatic_aberration_intensity', str(0.5))
+   490                                                       camera_bp.set_attribute('chromatic_aberration_offset', str(0))
+   491                                                       camera_location = carla.Location(0,0,0)
+   492                                                       camera_rotation = carla.Rotation(0,0,0)
+   493                                                       camera_transform = carla.Transform(camera_location, camera_rotation)
+   494                                                       self.spectator_cam = self.world.spawn_actor(
+   495                                                           camera_bp,
+   496                                                           camera_transform,
+   497                                                           attach_to=self.world.get_spectator(),
+   498                                                           attachment_type=carla.AttachmentType.Rigid
+   499                                                       )
+   500                                                       self.spectator_cam.listen(lambda image: self.spectator_cam_buffer.append(image))
+   501                                                       self.sensors.append(self.spectator_cam)
+   502                                           
+   503                                                       # rgb cam for transfuser
+   504                                                       camera_bp2 = self.world.get_blueprint_library().find('sensor.camera.rgb')
+   505                                                       camera_bp2.set_attribute("image_size_x", str(400))
+   506                                                       camera_bp2.set_attribute("image_size_y", str(300))
+   507                                                       camera_bp2.set_attribute("fov", str(100))
+   508                                                       camera_bp2.set_attribute('lens_circle_multiplier', str(3.0))
+   509                                                       camera_bp2.set_attribute('lens_circle_falloff', str(3.0))
+   510                                                       camera_bp2.set_attribute('chromatic_aberration_intensity', str(0.5))
+   511                                                       camera_bp2.set_attribute('chromatic_aberration_offset', str(0))
+   512                                                       camera_location = carla.Location(1.3, 0, 2.3)
+   513                                                       camera_rotation = carla.Rotation(0, 0, 0)
+   514                                                       camera_transform = carla.Transform(camera_location, camera_rotation)
+   515                                                       self.ego_cam = self.world.spawn_actor(
+   516                                                           camera_bp2,
+   517                                                           camera_transform,
+   518                                                           attach_to=ego_actor,
+   519                                                           attachment_type=carla.AttachmentType.Rigid
+   520                                                       )
+   521                                                       self.ego_cam.listen(lambda image: self.ego_cam_buffer.append(image))
+   522                                                       self.sensors.append(self.ego_cam)
+   523                                           
+   524                                                       # rgb left for trnasfuser
+   525                                                       camera_bp3 = self.world.get_blueprint_library().find('sensor.camera.rgb')
+   526                                                       camera_bp3.set_attribute("image_size_x", str(400))
+   527                                                       camera_bp3.set_attribute("image_size_y", str(300))
+   528                                                       camera_bp3.set_attribute("fov", str(100))
+   529                                                       camera_bp3.set_attribute('lens_circle_multiplier', str(3.0))
+   530                                                       camera_bp3.set_attribute('lens_circle_falloff', str(3.0))
+   531                                                       camera_bp3.set_attribute('chromatic_aberration_intensity', str(0.5))
+   532                                                       camera_bp3.set_attribute('chromatic_aberration_offset', str(0))
+   533                                                       # camera_location = carla.Location(0,0,0)
+   534                                                       camera_location = carla.Location(1.3, 0, 2.3)
+   535                                                       camera_rotation = carla.Rotation(0, -60, 0)
+   536                                                       camera_transform = carla.Transform(camera_location, camera_rotation)
+   537                                                       self.egoleft_cam = self.world.spawn_actor(
+   538                                                           camera_bp3,
+   539                                                           camera_transform,
+   540                                                           attach_to=ego_actor,
+   541                                                           attachment_type=carla.AttachmentType.Rigid
+   542                                                       )
+   543                                                       self.egoleft_cam.listen(lambda image: self.egoleft_cam_buffer.append(image))
+   544                                                       self.sensors.append(self.egoleft_cam)
+   545                                           
+   546                                                       # rgb right for transfuser
+   547                                                       camera_bp4 = self.world.get_blueprint_library().find('sensor.camera.rgb')
+   548                                                       camera_bp4.set_attribute("image_size_x", str(400))
+   549                                                       camera_bp4.set_attribute("image_size_y", str(300))
+   550                                                       camera_bp4.set_attribute("fov", str(100))
+   551                                                       camera_bp4.set_attribute('lens_circle_multiplier', str(3.0))
+   552                                                       camera_bp4.set_attribute('lens_circle_falloff', str(3.0))
+   553                                                       camera_bp4.set_attribute('chromatic_aberration_intensity', str(0.5))
+   554                                                       camera_bp4.set_attribute('chromatic_aberration_offset', str(0))
+   555                                                       camera_location = carla.Location(1.3, 0, 2.3)
+   556                                                       camera_rotation = carla.Rotation(0, 60, 0)
+   557                                                       camera_transform = carla.Transform(camera_location, camera_rotation)
+   558                                                       self.egoright_cam = self.world.spawn_actor(
+   559                                                           camera_bp4,
+   560                                                           camera_transform,
+   561                                                           attach_to=ego_actor,
+   562                                                           attachment_type=carla.AttachmentType.Rigid
+   563                                                       )
+   564                                                       self.egoright_cam.listen(lambda image: self.egoright_cam_buffer.append(image))
+   565                                                       self.sensors.append(self.egoright_cam)
+   566                                           
+   567                                                       # lidar for transfuser
+   568                                                       lidar_bp = self.world.get_blueprint_library().find('sensor.lidar.ray_cast')
+   569                                                       lidar_bp.set_attribute('range', str(85))
+   570                                                       lidar_bp.set_attribute('rotation_frequency', str(20))  # default: 10, change to 20 to generate 360 degree LiDAR point cloud
+   571                                                       lidar_bp.set_attribute('channels', str(64))
+   572                                                       lidar_bp.set_attribute('upper_fov', str(10))
+   573                                                       lidar_bp.set_attribute('lower_fov', str(-30))
+   574                                                       lidar_bp.set_attribute('points_per_second', str(2*600000))
+   575                                                       lidar_bp.set_attribute('atmosphere_attenuation_rate', str(0.004))
+   576                                                       lidar_bp.set_attribute('dropoff_general_rate', str(0.45))
+   577                                                       lidar_bp.set_attribute('dropoff_intensity_limit', str(0.8))
+   578                                                       lidar_bp.set_attribute('dropoff_zero_intensity', str(0.4))
+   579                                           
+   580                                                       camera_location = carla.Location(1.3, 0, 2.5)
+   581                                                       camera_rotation = carla.Rotation(0, -90, 0)
+   582                                                       camera_transform = carla.Transform(camera_location, camera_rotation)
+   583                                                       self.ego_lidar = self.world.spawn_actor(
+   584                                                           lidar_bp,
+   585                                                           camera_transform,
+   586                                                           attach_to=ego_actor,
+   587                                                           attachment_type=carla.AttachmentType.Rigid
+   588                                                       )
+   589                                                       self.ego_lidar.listen(lambda image: self.ego_lidar_buffer.append(image))
+   590                                                       self.sensors.append(self.ego_lidar)
+   591                                           
+   592                                                   # attach sensors
+   593        23         24.0      1.0      0.0          adv_bp_blacklist = ["vehicle.carlamotors.carlacola"]
+   594        23         21.6      0.9      0.0          if adv_state is not None:
+   595        23       8221.3    357.4      0.5              adv_transform = state_dict_to_transform(adv_state)[0]
+   596                                           
+   597                                                       # spawn adversarials
+   598       115        137.1      1.2      0.0              for agent_id in range(self.args.num_agents):
+   599                                                           # fetch blueprint
+   600        92         56.0      0.6      0.0                  if diverse_actors:
+   601                                                               # fetch random car CAD model
+   602                                                               blueprints = self.bp_library.filter('vehicle.*.*')
+   603                                                               blueprints = [bp for bp in blueprints if not bp.id in adv_bp_blacklist]
+   604                                                               adv_bp = random.choice(blueprints)
+   605                                           
+   606                                                               # set random color if possible
+   607                                                               if adv_bp.has_attribute("color"):
+   608                                                                   color = random.choice(adv_bp.get_attribute('color').recommended_values)
+   609                                                                   adv_bp.set_attribute('color', color)
+   610                                                           else:
+   611        92      10972.9    119.3      0.7                      adv_bp = self.bp_library.filter("model3")[0]
+   612                                           
+   613                                                           # try to spawn and move up in 5cm increments if spawning fails
+   614        92     125668.4   1366.0      8.2                  adv_actor = self.world.try_spawn_actor(adv_bp, adv_transform[agent_id])
+   615        92         85.9      0.9      0.0                  tries = 0
+   616        92         99.1      1.1      0.0                  while adv_actor is None and tries < 20:
+   617                                                               adv_transform[agent_id].location.z += 0.05
+   618                                                               adv_actor = self.world.try_spawn_actor(adv_bp, adv_transform[agent_id])
+   619                                                               tries += 1
+   620                                                               if tries == 20 and adv_actor is None:
+   621                                                                   print(f"WARNING: Could not spawn adv agent {agent_id}.")
+   622                                           
+   623        92        156.4      1.7      0.0                  self.actors.append(adv_actor)
+   624                                           
+   625       138        111.8      0.8      0.0          for actor in self.actors:
+   626       115         73.7      0.6      0.0              if actor:
+   627       115        710.5      6.2      0.0                  actor.set_simulate_physics(False)
+   628                                           
+   629        23     609347.2  26493.4     39.9          self.carla_wrapper.world.tick()
+   630        23     150202.2   6530.5      9.8          self.carla_wrapper.world.tick()
+   631        23     233055.5  10132.8     15.3          self.carla_wrapper.world.tick()
+
+  1.53 seconds - /scratch/zvasania/king/proxy_simulator/renderer.py:438 - initialize_carla_state

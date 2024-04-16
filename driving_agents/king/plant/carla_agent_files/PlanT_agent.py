@@ -10,6 +10,7 @@ import cv2
 import torch
 import numpy as np
 import carla
+import random, math
 
 from filterpy.kalman import MerweScaledSigmaPoints
 from filterpy.kalman import UnscentedKalmanFilter as UKF
@@ -30,6 +31,7 @@ def get_entry_point():
 
 SAVE_GIF = os.getenv("SAVE_GIF", 'False').lower() in ('true', '1', 't')
 
+random.seed(12345)
 
 class PlanTAgent(DataAgent):
     def setup(self, cfg, device=None, path_to_conf_file=None, exec_or_inter=None, route_index=""):
@@ -213,7 +215,7 @@ class PlanTAgent(DataAgent):
 
 
     @torch.no_grad()
-    def run_step(self, input_data, proxy_sim, sensors=None,  keep_ids=None):
+    def run_step(self, input_data, proxy_sim, sensors=None,  keep_ids=None, prevInp=None):
         
         self.keep_ids = keep_ids
             
@@ -238,12 +240,12 @@ class PlanTAgent(DataAgent):
         label_raw = super().get_bev_boxes(input_data=input_data, pos=tick_data['gps'])
         
         if self.exec_or_inter == 'inter':
-            keep_vehicle_ids = self._get_control(label_raw, tick_data)
+            keep_vehicle_ids, retInp = self._get_control(label_raw, tick_data, prevInp=prevInp)
             # print(f'plant: {keep_vehicle_ids}')
             
-            return keep_vehicle_ids
+            return keep_vehicle_ids, retInp
         elif self.exec_or_inter == 'exec' or self.exec_or_inter is None:
-            self.control = self._get_control(label_raw, tick_data)
+            self.control, retInp = self._get_control(label_raw, tick_data, prevInp=prevInp)
             
         
         inital_frames_delay = 40
@@ -254,13 +256,13 @@ class PlanTAgent(DataAgent):
             "brake": torch.tensor(1.0).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).to(self.device, dtype=torch.float32),
             }
             
-        return self.control
+        return self.control, retInp
 
     #@profile
-    def _get_control(self, label_raw, input_data):
+    def _get_control(self, label_raw, input_data, prevInp = None):
         
         gt_velocity = torch.FloatTensor([input_data['speed']]).unsqueeze(0)
-        input_batch = self.get_input_batch(label_raw, input_data)
+        input_batch, retInp = self.get_input_batch(label_raw, input_data, prevInp=prevInp)
         x, y, _, tp, light = input_batch
         tp = tp.to('cuda')
         light = light.to('cuda')
@@ -300,33 +302,57 @@ class PlanTAgent(DataAgent):
             
             return keep_vehicle_ids, attn_indices
 
-        return control
+        return control, retInp
     
     
-    def get_input_batch(self, label_raw, input_data):
+    def get_input_batch(self, label_raw, input_data, prevInp=None):
         sample = {'input': [], 'output': [], 'brake': [], 'waypoints': [], 'target_point': [], 'light': []}
 
         if self.cfg_agent.model.training.input_ego:
             data = label_raw
         else:
             data = label_raw[1:] # remove first element (ego vehicle)
+        x = 0
+        
+        if(data[0]['class'] == 'Car'):
+            x = 5
+            pass
 
         # x-y: Modify based on speed (* 0.25s per frame) to get uniform distr ranges
         # in each componenet direction
         # yaw: -30/30 degree delta
         # speed: +- 0.5 kmph uniform sampling
         # extent: -20%/20% sample delta from t = 0 (just for extent)
-        data_car = [[
-            1., # type indicator for cars
-            float(x['position'][0])-float(label_raw[0]['position'][0]),
-            float(x['position'][1])-float(label_raw[0]['position'][1]),
-            float(x['yaw'] * 180 / 3.14159265359), # in degrees
-            # meters/second -> km/h
-            float(x['speed'] * 3.6), # in km/h
-            float(x['extent'][2]),
-            float(x['extent'][1]),
-            ] for x in data if x['class'] == 'Car'] # and ((self.cfg_agent.model.training.remove_back and float(x['position'][0])-float(label_raw[0]['position'][0]) >= 0) or not self.cfg_agent.model.training.remove_back)]
-
+        if(prevInp == None or prevInp == []):
+            data_car = [[
+                1., # type indicator for cars
+                float(x['position'][0])-float(label_raw[0]['position'][0]),
+                float(x['position'][1])-float(label_raw[0]['position'][1]),
+                float(x['yaw'] * 180 / 3.14159265359), # in degrees
+                # meters/second -> km/h
+                float(x['speed'] * 3.6), # in km/h
+                float(x['extent'][2]),
+                float(x['extent'][1]),
+                ] for x in data if x['class'] == 'Car'] # and ((self.cfg_agent.model.training.remove_back and float(x['position'][0])-float(label_raw[0]['position'][0]) >= 0) or not self.cfg_agent.model.training.remove_back)]
+        else:
+            data_car = []
+            degToRad = 3.14159265359 / 180
+            for i in range(len(prevInp)):
+                distRange = ((prevInp[i][4] / 3.6) * 0.25)
+                posD = random.uniform(0, distRange)
+                posXD = posD * math.cos(prevInp[i][3] * degToRad)
+                posYD = posD * math.sin(prevInp[i][3] * degToRad)
+                yawD = random.uniform(-30,30)
+                speedD = random.uniform(-0.3, 0.5)
+                data_car.append([
+                    1.,
+                    prevInp[i][1] + posXD,
+                    prevInp[i][2] + posYD,
+                    prevInp[i][3] + yawD,
+                    prevInp[i][4] + speedD,
+                    prevInp[i][5],
+                    prevInp[i][6]
+                ])
         # if we use the far_node as target waypoint we need the route as input
         data_route = [
             [
@@ -391,7 +417,7 @@ class PlanTAgent(DataAgent):
         self.data_car = data_car
         self.data_route = data_route
         
-        return input_batch
+        return input_batch, data_car
     
     
     def destroy(self):

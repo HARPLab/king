@@ -12,4 +12,5 @@ with open(fileName, 'r') as file:
             totSum += len(val)
 print(f"Total routes tested: {totRoutes}")
 print(f"Routes with collisions: {numRoutes}")
-print(f"Avg num timesteps to collision: {totSum / numRoutes}")
+if(numRoutes > 0):
+    print(f"Avg num timesteps to collision: {totSum / numRoutes}")

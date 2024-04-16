@@ -1,0 +1,80 @@
+Timer unit: 1e-06 s
+
+Total time: 25.4621 s
+File: generate_scenarios.py
+Function: unroll_simulation at line 441
+
+Line #      Hits         Time  Per Hit   % Time  Line Contents
+==============================================================
+   441                                               @profile
+   442                                               def unroll_simulation(self, prevInp = None):
+   443                                                   """
+   444                                                   Simulates one episode of length `args.sim_horizon` in the differentiable
+   445                                                   simulator.
+   446                                                   """
+   447                                                   # initializations
+   448         8          9.2      1.1      0.0          semantic_grid = self.simulator.map
+   449         8         10.8      1.3      0.0          cost_dict = {"ego_col": [], "adv_rd": [], "adv_col": []}
+   450                                           
+   451         8          2.9      0.4      0.0          num_oob_agents_per_t = []
+   452         8          5.9      0.7      0.0          if self.args.renderer_class == 'CARLA':
+   453         8          7.1      0.9      0.0              self.simulator.renderer.initialize_carla_state(
+   454         8        237.8     29.7      0.0                  self.simulator.get_ego_state(),
+   455         8        138.8     17.4      0.0                  self.simulator.get_adv_state(),
+   456         8     485742.4  60717.8      1.9                  town=self.town,
+   457                                                       )
+   458                                           
+   459         8          6.0      0.8      0.0              rgb_per_t = []
+   460         8          3.1      0.4      0.0              observations_per_t = []
+   461         8          3.7      0.5      0.0              lidar_per_t1 = []
+   462         8          3.9      0.5      0.0              lidar_per_t2 = []
+   463         8          4.4      0.5      0.0          currInp = []
+   464       574        284.1      0.5      0.0          for t in range(self.args.sim_horizon):
+   465       567     279257.1    492.5      1.1              input_data = self.simulator.get_ego_sensor()
+   466       567        548.1      1.0      0.0              if(self.args.ego_agent == 'PlanT'):
+   467       567     496214.1    875.2      1.9                  input_data.update({"hd_map": {"vehWorld": self.simulator.renderer.hero_actor, "opendrive": self.simulator.carla_wrapper.map.to_opendrive()}})
+   468       567       1794.9      3.2      0.0              input_data.update({"timestep": self.simulator.timestep})
+   469                                           
+   470       567        904.9      1.6      0.0              observations, _ = self.simulator.renderer.get_observations(semantic_grid, 
+   471       567      31665.9     55.8      0.1                                                                         self.simulator.get_ego_state(), 
+   472       567    2746320.3   4843.6     10.8                                                                         self.simulator.get_adv_state())
+   473       566        626.4      1.1      0.0              input_data.update(observations)
+   474                                                       # Modify input_data here according to loss
+   475                                                           # Check what input_data contains with regard to other vehicles
+   476                                                       #segbevL.append(input_data['birdview'])
+   477       566        541.7      1.0      0.0              if(self.args.ego_agent != 'PlanT'):
+   478                                                           ego_actions = self.simulator.ego_policy.run_step(input_data, self.simulator)
+   479                                                       else:
+   480       566        414.7      0.7      0.0                  if(prevInp != None):
+   481       486   14897140.7  30652.6     58.5                      ego_actions, retInp = self.simulator.ego_policy.run_step(input_data, self.simulator, prevInp=prevInp[t])
+   482                                                           else:
+   483        80    2342140.2  29276.8      9.2                      ego_actions, retInp = self.simulator.ego_policy.run_step(input_data, self.simulator, prevInp=None)
+   484       566        478.5      0.8      0.0                  currInp.append(retInp)
+   485                                           
+   486       566        758.4      1.3      0.0              if self.args.detach_ego_path:
+   487       566       2635.5      4.7      0.0                  ego_actions["steer"] = ego_actions["steer"].detach()
+   488       566        831.0      1.5      0.0                  ego_actions["throttle"] = ego_actions["throttle"].detach()
+   489       566        789.6      1.4      0.0                  ego_actions["brake"] = ego_actions["brake"].detach()
+   490                                           
+   491       566      49133.4     86.8      0.2              adv_actions = self.simulator.adv_policy.run_step(input_data)
+   492                                           
+   493       566     864037.7   1526.6      3.4              num_oob_agents = self.simulator.run_termination_checks()
+   494       566        447.9      0.8      0.0              num_oob_agents_per_t.append(num_oob_agents)
+   495                                           
+   496       566    2553346.6   4511.2     10.0              ego_col_cost, adv_col_cost, adv_rd_cost = self.compute_cost()
+   497                                           
+   498       566        649.9      1.1      0.0              cost_dict["adv_rd"].append(adv_rd_cost)
+   499       566        359.7      0.6      0.0              cost_dict["adv_col"].append(adv_col_cost)
+   500       566        322.5      0.6      0.0              cost_dict["ego_col"].append(ego_col_cost)
+   501                                           
+   502                                                       # compute next state given current state and actions
+   503       566     702394.1   1241.0      2.8              self.simulator.step(ego_actions, adv_actions)
+   504                                           
+   505                                                   # stack timesteps for oob metric
+   506         7       1416.4    202.3      0.0          num_oob_agents_per_t = torch.stack(num_oob_agents_per_t, dim=1)
+   507                                                   #torch.save(segbevL, 'segbev.pt')
+   508                                           
+   509         7        435.5     62.2      0.0          torch.cuda.empty_cache()
+   510         7          3.3      0.5      0.0          return cost_dict, num_oob_agents_per_t, currInp
+
+ 25.46 seconds - generate_scenarios.py:441 - unroll_simulation
