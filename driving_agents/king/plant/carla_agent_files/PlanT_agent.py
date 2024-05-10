@@ -38,6 +38,7 @@ class PlanTAgent(DataAgent):
         self.cfg = cfg
         self.exec_or_inter = exec_or_inter
         self.device = device
+        #self.savedVariance = False
 
         # first args than super setup is important!
         args_file = open(os.path.join(path_to_conf_file, 'args.txt'), 'r')
@@ -312,11 +313,17 @@ class PlanTAgent(DataAgent):
             data = label_raw
         else:
             data = label_raw[1:] # remove first element (ego vehicle)
-        x = 0
         
-        if(data[0]['class'] == 'Car'):
-            x = 5
-            pass
+        origDataCar = [[
+                1., # type indicator for cars
+                float(x['position'][0]),
+                float(x['position'][1]),
+                float(x['yaw'] * 180 / 3.14159265359), # in degrees
+                # meters/second -> km/h
+                float(x['speed'] * 3.6), # in km/h
+                float(x['extent'][2]),
+                float(x['extent'][1]),
+                ] for x in label_raw if x['class'] == 'Car']
 
         # x-y: Modify based on speed (* 0.25s per frame) to get uniform distr ranges
         # in each componenet direction
@@ -337,9 +344,12 @@ class PlanTAgent(DataAgent):
         else:
             data_car = []
             degToRad = 3.14159265359 / 180
+            modified = False
             for i in range(len(prevInp)):
                 distRange = ((prevInp[i][4] / 3.6) * 0.25)
-                posD = random.uniform(0, distRange)
+                #posD = random.uniform(0, distRange)
+                # -25 to 25 is absurd range so that we find a collision
+                posD = random.uniform(-25, 25)
                 posXD = posD * math.cos(prevInp[i][3] * degToRad)
                 posYD = posD * math.sin(prevInp[i][3] * degToRad)
                 yawD = random.uniform(-30,30)
@@ -353,6 +363,14 @@ class PlanTAgent(DataAgent):
                     prevInp[i][5],
                     prevInp[i][6]
                 ])
+                #if(not self.savedVariance and posD > 0):
+                #    with open(f"variances/SavedVarianceX_{i}.txt", "a") as file:
+                #        file.write(f"{posXD}" + "\n")
+                #    with open(f"variances/SavedVarianceY_{i}.txt", "a") as file:
+                #        file.write(f"{posYD}" + "\n")
+                #    modified = True
+            #if(modified):
+            #    self.savedVariance = True
         # if we use the far_node as target waypoint we need the route as input
         data_route = [
             [
@@ -417,7 +435,7 @@ class PlanTAgent(DataAgent):
         self.data_car = data_car
         self.data_route = data_route
         
-        return input_batch, data_car
+        return input_batch, (data_car, origDataCar)
     
     
     def destroy(self):

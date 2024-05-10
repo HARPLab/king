@@ -137,10 +137,12 @@ class GenerationEngine:
 
         all_metrics = []
         first_metric_per_route = []
+        got_crash_route = False
         for ix, self.route_iter in enumerate(route_loop_bar):
             state_buffers = []
             ego_actions_buffers = []
             adv_actions_buffers = []
+            #self.simulator.ego_policy.savedVariance = False
 
             # ROUTE SETUP #
             with torch.no_grad():
@@ -232,7 +234,7 @@ class GenerationEngine:
                             total_objective.backward()
                         scenario_optim.step()
                     else:
-                        assert(self.args.ego_agent == 'PlanT' and self.args.optimType == "randombbo")
+                        #assert(self.args.ego_agent == 'PlanT' and self.args.optimType == "randombbo")
                         if(total_objective.item() < prevLoss):
                             prevInpSp = nextInpSp
                             prevLoss = total_objective.item()
@@ -275,8 +277,22 @@ class GenerationEngine:
                 all_metrics[i].append(log)
 
                 if col_metric == 1:
+                    if(self.args.attackSpace == "inp"):
+                        if(self.args.ego_agent == "PlanT"):
+                            pass
+                            #with open('collisionRoute.json', 'w') as file:
+                            #    json.dump(prevInpSp, file)
+                        elif(self.args.ego_agent == 'aim-bev'):
+                            torch.save(prevInpSp, 'collisionRoute.pt')
                     break
-            # prepare and save results of route
+            
+            # This cases on whether there was a collision causing the inner loop to break early
+            if(i + 1 != self.args.opt_iters):
+                got_crash_route = True
+                print('---')
+            elif(not got_crash_route and os.path.exists('collisionPlanT.pt')):
+                os.remove('collisionPlanT.pt')
+
             with open(f"./{self.args.saveFile}.txt", "a") as file:
                 file.write(','.join(str(num) for num in numCollisions) + "\n")
             """if(ix == 0):
@@ -458,7 +474,7 @@ class GenerationEngine:
             observations_per_t = []
             lidar_per_t1 = []
             lidar_per_t2 = []
-        currInp = []
+        currInp, simInp = [], []
         for t in range(self.args.sim_horizon):
             input_data = self.simulator.get_ego_sensor()
             if(self.args.ego_agent == 'PlanT'):
@@ -472,14 +488,18 @@ class GenerationEngine:
             # Modify input_data here according to loss
                 # Check what input_data contains with regard to other vehicles
             #segbevL.append(input_data['birdview'])
-            if(self.args.ego_agent != 'PlanT'):
+            if(self.args.ego_agent != 'PlanT' and self.args.ego_agent != 'aim-bev'):
                 ego_actions = self.simulator.ego_policy.run_step(input_data, self.simulator)
             else:
                 if(prevInp != None):
                     ego_actions, retInp = self.simulator.ego_policy.run_step(input_data, self.simulator, prevInp=prevInp[t])
                 else:
                     ego_actions, retInp = self.simulator.ego_policy.run_step(input_data, self.simulator, prevInp=None)
-                currInp.append(retInp)
+                if(self.args.ego_agent == 'aim-bev'):
+                    currInp.append(retInp)
+                else:
+                    currInp.append(retInp[0])
+                    simInp.append(retInp[1])
 
             if self.args.detach_ego_path:
                 ego_actions["steer"] = ego_actions["steer"].detach()
@@ -505,6 +525,10 @@ class GenerationEngine:
         #torch.save(segbevL, 'segbev.pt')
 
         torch.cuda.empty_cache()
+        if(len(simInp) > 0):
+            with open('collisionPlanT.json', 'w') as file:
+                json.dump(simInp, file)
+
         return cost_dict, num_oob_agents_per_t, currInp
 
     def compute_cost(self):

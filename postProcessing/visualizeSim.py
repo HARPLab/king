@@ -7,7 +7,7 @@ def visualize():
     directory = "visualize"
     if not os.path.exists(directory):
         os.makedirs(directory)
-    fileName = "segbev.pt"
+    fileName = "collisionRoute.pt"
     loaded_tensors = torch.load(fileName)
     for i in tqdm.tqdm(range(len(loaded_tensors))):
         innerD = os.path.join(directory, f"Timestep{i}")

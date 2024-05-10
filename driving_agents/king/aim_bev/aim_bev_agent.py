@@ -3,7 +3,7 @@ import json
 import numpy as np
 from collections import deque
 
-import torch
+import torch, random
 
 from driving_agents.king.aim_bev import datagen_bev_renderer
 from driving_agents.king.expert.expert_agent import AutoPilot
@@ -27,6 +27,9 @@ class AimBEVAgent(AutoPilot):
         self.net.load_state_dict(torch.load(os.path.join(path_to_conf_file, 'model.pth')))
         self.net.cuda()
         self.net.eval()
+        self.p = 0.6 # 0.861
+        self.nSide = 10
+        self.maskProbs = torch.full_like(torch.randn(self.nSide,self.nSide), self.p)
 
 
     def _init(self, world):
@@ -77,7 +80,7 @@ class AimBEVAgent(AutoPilot):
 
         return input_data
 
-    def run_step(self, input_data, world):
+    def run_step(self, input_data, world, prevInp=None):
         self.step += 1
         with torch.no_grad():
             if not self.initialized:
@@ -86,16 +89,25 @@ class AimBEVAgent(AutoPilot):
                     self.steer_buffer.append(deque(maxlen=self.steer_buffer_size))
             tick_data = self.tick(input_data)
 
-        return self._get_control(tick_data)
+        return self._get_control(tick_data, birdview=prevInp)
 
     def _get_control(self, input_data, steer=None, throttle=None,
-                        vehicle_hazard=None, light_hazard=None, walker_hazard=None, stop_sign_hazard=None):
+                        vehicle_hazard=None, light_hazard=None, walker_hazard=None, stop_sign_hazard=None, birdview=None):
         """
         """
         self._vehicle_state = self._world.get_ego_state()
 
-        seg_bev = input_data['birdview']
-
+        if(birdview == None):
+            seg_bev = input_data['birdview']
+        else:
+            inpTens = birdview[0,2]
+            x, y = random.randint(0,inpTens.size(0) - self.nSide - 1), random.randint(0,inpTens.size(1) - self.nSide - 1)
+            mask = torch.bernoulli(self.maskProbs).bool()
+            patch = inpTens[x:x+self.nSide, y:y+self.nSide]
+            patch[mask] = 0.5
+            birdview[0,2,x:x+self.nSide, y:y+self.nSide] = 2*patch - birdview[0,2,x:x+self.nSide, y:y+self.nSide]
+            seg_bev = birdview
+            
         gt_velocity = input_data['speed'].squeeze(1)
         light_hazard = input_data['light_hazard']
         target_point = input_data['target_point']
@@ -110,7 +122,7 @@ class AimBEVAgent(AutoPilot):
             "brake": brake.unsqueeze(dim=1),
         }
 
-        return actions
+        return actions, seg_bev
 
     def _get_position_batched(self, gps):
         gps = (gps - torch.from_numpy(self._command_planner.mean).to(device=self.args_map_agent['device'])) * torch.from_numpy(self._command_planner.scale).to(device=self.args_map_agent['device'])
